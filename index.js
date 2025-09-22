@@ -58,15 +58,18 @@ async function handleEvent(event) {
       type: "text",
       text: replyText,
     });
+
   } catch (error) {
     console.error("OpenAI veya LINE Hatası:", error);
+
+    // Fallback mesaj ayrı try/catch ile
     try {
       await client.replyMessage(event.replyToken, {
         type: "text",
         text: "Üzgünüm, şu an cevap veremiyorum 😔",
       });
-    } catch (err2) {
-      console.error("LINE reply hatası:", err2);
+    } catch (err) {
+      console.error("LINE reply hatası:", err);
     }
   }
 }
