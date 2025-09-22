@@ -9,17 +9,21 @@ const config = {
 };
 
 const client = new line.Client(config);
-const app = express();
 
 // OpenAI ayarları
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+const app = express();
+app.use(express.json()); // JSON parsing
+
 // Webhook endpoint
-app.post("/webhook", line.middleware(config), (req, res) => {
+app.post("/webhook", line.middleware(config), async (req, res) => {
   res.sendStatus(200);
-  req.body.events.map(handleEvent); // sadece bu satır olmalı
+  for (const event of req.body.events) {
+    await handleEvent(event);
+  }
 });
 
 // Event handler
@@ -28,14 +32,16 @@ async function handleEvent(event) {
 
   try {
     const userMessage = event.message.text;
+    console.log("Kullanıcı mesajı:", userMessage);
 
-    // OpenAI'ye kullanıcı mesajını gönder
+    // OpenAI cevabı al
     const completion = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [{ role: "user", content: userMessage }],
     });
 
     const replyText = completion.choices[0].message.content;
+    console.log("OpenAI cevabı:", replyText);
 
     // LINE'a cevap gönder
     await client.replyMessage(event.replyToken, {
