@@ -20,9 +20,20 @@ app.use(express.json()); // JSON parsing
 
 // Webhook endpoint
 app.post("/webhook", line.middleware(config), async (req, res) => {
-  res.sendStatus(200);
-  for (const event of req.body.events) {
-    await handleEvent(event);
+  try {
+    if (!req.body || !req.body.events) {
+      console.error("Invalid request body:", req.body);
+      return res.sendStatus(400);
+    }
+
+    for (const event of req.body.events) {
+      await handleEvent(event);
+    }
+
+    res.sendStatus(200);
+  } catch (err) {
+    console.error("Webhook error:", err);
+    res.sendStatus(500);
   }
 });
 
@@ -34,7 +45,6 @@ async function handleEvent(event) {
     const userMessage = event.message.text;
     console.log("Kullanıcı mesajı:", userMessage);
 
-    // OpenAI cevabı al
     const completion = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [{ role: "user", content: userMessage }],
@@ -43,17 +53,20 @@ async function handleEvent(event) {
     const replyText = completion.choices[0].message.content;
     console.log("OpenAI cevabı:", replyText);
 
-    // LINE'a cevap gönder
     await client.replyMessage(event.replyToken, {
       type: "text",
       text: replyText,
     });
   } catch (error) {
     console.error("OpenAI Hatası:", error);
-    await client.replyMessage(event.replyToken, {
-      type: "text",
-      text: "Üzgünüm, şu an cevap veremiyorum 😔",
-    });
+    try {
+      await client.replyMessage(event.replyToken, {
+        type: "text",
+        text: "Üzgünüm, şu an cevap veremiyorum 😔",
+      });
+    } catch (err) {
+      console.error("LINE reply Hatası:", err);
+    }
   }
 }
 
