@@ -30,7 +30,7 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
       await handleEvent(event);
     }
 
-    res.sendStatus(200);
+    res.sendStatus(200); // Başarıyla işlendi
   } catch (err) {
     console.error("Webhook error:", err);
     res.sendStatus(500);
