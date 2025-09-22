@@ -19,7 +19,7 @@ const openai = new OpenAI({
 // Webhook endpoint
 app.post("/webhook", line.middleware(config), (req, res) => {
   res.sendStatus(200);
-  req.body.events.map(handleEvent); // sadece bu satır olacak
+  req.body.events.map(handleEvent); // sadece bu satır olmalı
 });
 
 // Event handler
@@ -51,7 +51,7 @@ async function handleEvent(event) {
   }
 }
 
-// Port ayarı (Render otomatik port verir)
+// Port ayarı
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`ChatGPT bot ${PORT} portunda çalışıyor 🚀`);
