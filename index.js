@@ -33,12 +33,15 @@ async function handleEvent(event) {
   if (event.type === "message" && event.message.type === "text") {
     const userMessage = event.message.text;
 
-    const gptResponse = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [{ role: "user", content: userMessage }]
+    async function handleEvent(event) {
+  if (event.type === "message" && event.message.type === "text") {
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: `Bana şunu söyledin: ${event.message.text}`
     });
-
-    const replyText = gptResponse.choices[0].message.content;
+  }
+  return Promise.resolve(null);
+}
 
     return client.replyMessage(event.replyToken, {
       type: "text",
