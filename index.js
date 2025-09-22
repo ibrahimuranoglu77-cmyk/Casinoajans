@@ -1,58 +1,39 @@
 const express = require("express");
-const { Client } = require("@line/bot-sdk");
-const OpenAI = require("openai");
-require("dotenv").config();
+const line = require("@line/bot-sdk");
 
-// LINE ayarları
-const lineConfig = {
+// LINE ayarları (Render Environment Variables üzerinden)
+const config = {
   channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
-  channelSecret: process.env.LINE_CHANNEL_SECRET
+  channelSecret: process.env.LINE_CHANNEL_SECRET,
 };
-const client = new Client(lineConfig);
 
-// OpenAI ayarları (CommonJS uyumlu)
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
-
+const client = new line.Client(config);
 const app = express();
-app.use(express.json());
 
 // Webhook endpoint
-app.post("/webhook", async (req, res) => {
+app.post("/webhook", line.middleware(config), (req, res) => {
   Promise.all(req.body.events.map(handleEvent))
-    .then(() => res.sendStatus(200))
+    .then((result) => res.json(result))
     .catch((err) => {
       console.error(err);
-      res.sendStatus(500);
+      res.status(500).end();
     });
 });
 
-// Event işleme
-async function handleEvent(event) {
-  if (event.type === "message" && event.message.type === "text") {
-    const userMessage = event.message.text;
-
-    async function handleEvent(event) {
-  if (event.type === "message" && event.message.type === "text") {
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: `Bana şunu söyledin: ${event.message.text}`
-    });
+// Event handler (echo)
+function handleEvent(event) {
+  if (event.type !== "message" || event.message.type !== "text") {
+    return Promise.resolve(null);
   }
-  return Promise.resolve(null);
+
+  return client.replyMessage(event.replyToken, {
+    type: "text",
+    text: `Bana şunu söyledin: ${event.message.text}`,
+  });
 }
 
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: replyText
-    });
-  }
-  return Promise.resolve(null);
-}
-
-// Replit otomatik PORT kullan
+// Sunucu başlat
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`GPT LINE Bot ${PORT} portunda çalışıyor 🚀`));
-
-
+app.listen(PORT, () => {
+  console.log(`Echo bot ${PORT} portunda çalışıyor 🚀`);
+});
