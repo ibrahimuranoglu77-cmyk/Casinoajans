@@ -1,383 +1,109 @@
-'use strict'; // Required to use class in node v4
+/*
+LINE Grup Üye Giriş/Çıkış Botu
+- Node.js + Express + @line/bot-sdk
+- Çalıştırma: NODE 18+, ortam değişkenleri CHANNEL_ACCESS_TOKEN ve CHANNEL_SECRET ayarlı olmalı
+- Webhook URL'niz HTTPS olmalı ve LINE Developers konsolunda set edilmiş olmalı
+*/
 
-const EventEmitter = require('events');
-const fetch = require('node-fetch');
-const crypto = require('crypto');
-const http = require('http');
-const bodyParser = require('body-parser');
-const debug = require('debug')('linebot');
+const line = require('@line/bot-sdk');
+const express = require('express');
 
-class LineBot extends EventEmitter {
+const config = {
+  channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
+  channelSecret: process.env.CHANNEL_SECRET,
+};
 
-  constructor(options) {
-    super();
-    this.options = options || {};
-    this.options.channelId = options.channelId || '';
-    this.options.channelSecret = options.channelSecret || '';
-    this.options.channelAccessToken = options.channelAccessToken || '';
-    if (this.options.verify === undefined) {
-      this.options.verify = true;
-    }
-    this.headers = {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      Authorization: 'Bearer ' + this.options.channelAccessToken
-    };
-    this.endpoint = 'https://api.line.me/v2/bot';
-    this.dataEndpoint = 'https://api-data.line.me/v2/bot';
-  }
+const client = new line.Client(config);
+const app = express();
 
-  verify(rawBody, signature) {
-    const hash = crypto.createHmac('sha256', this.options.channelSecret)
-      .update(rawBody, 'utf8')
-      .digest('base64');
-    // Constant-time comparison to prevent timing attack.
-    if (hash.length !== signature.length) {
-      return false;
-    }
-    let res = 0;
-    for (let i = 0; i < hash.length; i++) {
-      res |= (hash.charCodeAt(i) ^ signature.charCodeAt(i));
-    }
-    return res === 0;
-  }
-
-  parse(body) {
-    const that = this;
-    if (!body || !body.events) {
-      return;
-    }
-    body.events.forEach(function(event) {
-      debug('%O', event);
-      event.reply = function (message) {
-        return that.reply(event.replyToken, message);
-      };
-      if (event.source) {
-        event.source.profile = function() {
-          if (event.source.type === 'group') {
-            return that.getGroupMemberProfile(event.source.groupId, event.source.userId);
-          }
-          if (event.source.type === 'room') {
-            return that.getRoomMemberProfile(event.source.roomId, event.source.userId);
-          }
-          return that.getUserProfile(event.source.userId);
-        };
-        event.source.member = function() {
-          if (event.source.type === 'group') {
-            return that.getGroupMember(event.source.groupId);
-          }
-          if (event.source.type === 'room') {
-            return that.getRoomMember(event.source.roomId);
-          }
-        };
-      }
-      if (event.message) {
-        event.message.content = function() {
-          return that.getMessageContent(event.message.id);
-        };
-      }
-      process.nextTick(function() {
-        that.emit(event.type, event);
-      });
+// LINE imza doğrulaması için middleware
+app.post('/webhook', line.middleware(config), express.json(), (req, res) => {
+  Promise
+    .all(req.body.events.map(handleEvent))
+    .then(() => res.status(200).end())
+    .catch((err) => {
+      console.error('handleEvent error', err);
+      res.status(500).end();
     });
-  }
+});
 
-  static createMessages(message) {
-    if (typeof message === 'string') {
-      return [{ type: 'text', text: message }];
-    }
-    if (Array.isArray(message)) {
-      return message.map(function(m) {
-        if (typeof m === 'string') {
-          return { type: 'text', text: m };
-        }
-        return m;
-      });
-    }
-    return [message];
-  }
-
-  reply(replyToken, message) {
-    const url = '/message/reply';
-    const body = {
-      replyToken: replyToken,
-      messages: LineBot.createMessages(message)
-    };
-    debug('POST %s', url);
-    debug('%O', body);
-    return this.post(url, body).then(res => res.json()).then((result) => {
-      debug(result);
-      return result;
-    });
-  }
-
-  push(to, message) {
-    const url = '/message/push';
-    if (Array.isArray(to)) {
-      return Promise.all(to.map(recipient => this.push(recipient, message)));
-    }
-    const body = {
-      to: to,
-      messages: LineBot.createMessages(message)
-    };
-    debug('POST %s', url);
-    debug('%O', body);
-    return this.post(url, body).then(res => res.json()).then((result) => {
-      debug('%O', result);
-      return result;
-    });
-  }
-
-  multicast(to, message) {
-    const url = '/message/multicast';
-    const body = {
-      to: to,
-      messages: LineBot.createMessages(message)
-    };
-    debug('POST %s', url);
-    debug('%O', body);
-    return this.post(url, body).then(res => res.json()).then((result) => {
-      debug('%O', result);
-      return result;
-    });
-  }
-
-  broadcast(message){
-    const url = '/message/broadcast';
-    const body = {
-      messages: LineBot.createMessages(message)
-    };
-    debug('POST %s', url);
-    debug('%O', body);
-    return this.post(url, body).then(res => res.json()).then((result) => {
-      debug('%O', result);
-      return result;
-    });
-  }
-
-  getMessageContent(messageId) {
-    const url = `/message/${messageId}/content`;
-    debug('GET %s', url);
-    return this.getData(url).then(res => res.buffer()).then((buffer) => {
-      debug(buffer.toString('hex'));
-      return buffer;
-    });
-  }
-
-  getUserProfile(userId) {
-    const url = `/profile/${userId}`;
-    debug('GET %s', url);
-    return this.get(url).then(res => res.json()).then((profile) => {
-      debug('%O', profile);
-      return profile;
-    });
-  }
-
-  getGroupMemberProfile(groupId, userId) {
-    const url = `/group/${groupId}/member/${userId}`;
-    debug('GET %s', url);
-    return this.get(url).then(res => res.json()).then((profile) => {
-      debug('%O', profile);
-      profile.groupId = groupId;
-      return profile;
-    });
-  }
-
-  getGroupMember(groupId, next) {
-    const url = `/group/${groupId}/members/ids` + (next ? `?start=${next}` : '');
-    debug('GET %s', url);
-    return this.get(url).then(res => res.json()).then((groupMember) => {
-      debug('%O', groupMember);
-      if (groupMember.next) {
-        return this.getGroupMember(groupId, groupMember.next).then((nextGroupMember) => {
-          groupMember.memberIds = groupMember.memberIds.concat(nextGroupMember.memberIds);
-          delete groupMember.next;
-          return groupMember;
-        });
-      }
-      delete groupMember.next;
-      return groupMember;
-    });
-  }
-
-  leaveGroup(groupId) {
-    const url = `/group/${groupId}/leave`;
-    debug('POST %s', url);
-    return this.post(url).then(res => res.json()).then((result) => {
-      debug('%O', result);
-      return result;
-    });
-  }
-
-  getRoomMemberProfile(roomId, userId) {
-    const url = `/room/${roomId}/member/${userId}`;
-    debug('GET %s', url);
-    return this.get(url).then(res => res.json()).then((profile) => {
-      debug('%O', profile);
-      profile.roomId = roomId;
-      return profile;
-    });
-  }
-
-  getRoomMember(roomId, next) {
-    const url = `/room/${roomId}/members/ids` + (next ? `?start=${next}` : '');
-    debug('GET %s', url);
-    return this.get(url).then(res => res.json()).then((roomMember) => {
-      debug('%O', roomMember);
-      if (roomMember.next) {
-        return this.getRoomMember(roomId, roomMember.next).then((nextRoomMember) => {
-          roomMember.memberIds = roomMember.memberIds.concat(nextRoomMember.memberIds);
-          delete roomMember.next;
-          return roomMember;
-        });
-      }
-      delete roomMember.next;
-      return roomMember;
-    });
-  }
-
-  leaveRoom(roomId) {
-    const url = `/room/${roomId}/leave`;
-    debug('POST %s', url);
-    return this.post(url).then(res => res.json()).then((result) => {
-      debug('%O', result);
-      return result;
-    });
-  }
-
-  getTotalFollowers(date) {
-    if (date == null) {
-      date = yesterday();
-    }
-    const url = `/insight/followers?date=${date}`;
-    debug('GET %s', url);
-    return this.get(url).then(res => res.json()).then((result) => {
-      debug('%O', result);
-      return result;
-    });
-  }
-
-  getQuota() {
-    const url = '/message/quota';
-    debug('GET %s', url);
-    return this.get(url).then(res => res.json()).then((result) => {
-      debug('%O', result);
-      return result;
-    });
-  }
-
-  getTotalReplyMessages(date) {
-    return this.getTotalMessages(date, 'reply');
-  }
-
-  getTotalPushMessages(date) {
-    return this.getTotalMessages(date, 'push');
-  }
-
-  getTotalBroadcastMessages(date) {
-    return this.getTotalMessages(date, 'broadcast');
-  }
-
-  getTotalMulticastMessages(date) {
-    return this.getTotalMessages(date, 'multicast');
-  }
-
-  getTotalMessages(date, type) {
-    if (date == null) {
-      date = yesterday();
-    }
-    const url = `/message/delivery/${type}?date=${date}`;
-    debug('GET %s', url);
-    return this.get(url).then(res => res.json()).then((result) => {
-      debug('%O', result);
-      return result;
-    });
-  }
-
-  get(path) {
-    const url = this.endpoint + path;
-    const options = { method: 'GET', headers: this.headers };
-    return fetch(url, options);
-  }
-
-  getData(path) {
-    const url = this.dataEndpoint + path;
-    const options = { method: 'GET', headers: this.headers };
-    return fetch(url, options);
-  }
-
-  post(path, body) {
-    const url = this.endpoint + path;
-    const options = { method: 'POST', headers: this.headers, body: JSON.stringify(body) };
-    return fetch(url, options);
-  }
-
-  // Optional Express.js middleware
-  parser() {
-    const parser = bodyParser.json({
-      verify: function (req, res, buf, encoding) {
-        req.rawBody = buf.toString(encoding);
-      }
-    });
-    return (req, res) => {
-      parser(req, res, () => {
-        if (this.options.verify && !this.verify(req.rawBody, req.get('X-Line-Signature'))) {
-          return res.sendStatus(400);
-        }
-        this.parse(req.body);
-        return res.json({});
-      });
-    };
-  }
-
-  // Optional built-in http server
-  listen(path, port, callback) {
-    const parser = bodyParser.json({
-      verify: function (req, res, buf, encoding) {
-        req.rawBody = buf.toString(encoding);
-      }
-    });
-    const server = http.createServer((req, res) => {
-      const signature = req.headers['x-line-signature']; // Must be lowercase
-      res.setHeader('X-Powered-By', 'linebot');
-      if (req.method === 'POST' && req.url === path) {
-        parser(req, res, () => {
-          if (this.options.verify && !this.verify(req.rawBody, signature)) {
-            res.statusCode = 400;
-            res.setHeader('Content-Type', 'text/html; charset=utf-8');
-            return res.end('Bad request');
-          }
-          this.parse(req.body);
-          res.statusCode = 200;
-          res.setHeader('Content-Type', 'application/json');
-          return res.end('{}');
-        });
+// Helper: userId listesinden isimleri almaya çalış
+async function resolveNames(groupId, members) {
+  const names = [];
+  for (const m of members) {
+    try {
+      // groupId varsa group profilini, yoksa room profilini dene
+      if (groupId) {
+        const profile = await client.getGroupMemberProfile(groupId, m.userId);
+        names.push(profile.displayName || m.userId);
       } else {
-        res.statusCode = 404;
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        return res.end('Not found');
+        const profile = await client.getRoomMemberProfile(m.userId);
+        names.push(profile.displayName || m.userId);
       }
-    });
-    return server.listen(port, callback);
+    } catch (e) {
+      // Eğer profil alınamazsa userId koy
+      names.push(m.userId);
+    }
   }
-
-} // class LineBot
-
-function createBot(options) {
-  return new LineBot(options);
+  return names;
 }
 
-function yesterday() {
-  const tempDate = new Date();
-  tempDate.setDate(tempDate.getDate() - 1);
-  const yesterday = tempDate.toLocaleString('en-US', {
-    timeZone: 'Asia/Tokyo',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric'
-  });
-  return yesterday.substr(6, 4) + yesterday.substr(0, 2) + yesterday.substr(3, 2);
+async function handleEvent(event) {
+  // Sadece memberJoined / memberLeft / join / leave ile ilgileniyoruz
+  try {
+    if (event.type === 'memberJoined') {
+      // event.joined.members: [{userId: '...'}]
+      const groupId = event.source.groupId || event.source.roomId || null;
+      const memberIds = event.joined && event.joined.members ? event.joined.members : [];
+      const names = await resolveNames(groupId, memberIds);
+      const text = `Yeni katılan: ${names.join(', ')}`;
+
+      // Eğer replyToken varsa (genelde olabilir) reply, yoksa push
+      if (event.replyToken) {
+        return client.replyMessage(event.replyToken, { type: 'text', text });
+      } else if (groupId) {
+        return client.pushMessage(groupId, { type: 'text', text });
+      }
+      return Promise.resolve(null);
+    }
+
+    if (event.type === 'memberLeft') {
+      // event.left.members: [{userId: '...'}]
+      const groupId = event.source.groupId || event.source.roomId || null;
+      const memberIds = event.left && event.left.members ? event.left.members : [];
+      // Not: profile bilgisi artık alınamayabilir; bu yüzden userId göstermek gerekebilir
+      const names = memberIds.map(m => m.userId);
+      const text = `Ayrılan: ${names.join(', ')}`;
+
+      if (groupId) {
+        return client.pushMessage(groupId, { type: 'text', text });
+      }
+      return Promise.resolve(null);
+    }
+
+    if (event.type === 'join') {
+      // Bot gruba eklendiğinde tetiklenir
+      if (event.replyToken) {
+        return client.replyMessage(event.replyToken, { type: 'text', text: 'Bot gruba eklendi. Üye giriş/çıkışlarını takip edeceğim.' });
+      }
+    }
+
+    if (event.type === 'leave') {
+      // Bot gruptan çıkarıldı
+      console.log('Bot left the group/room', event.source);
+      return Promise.resolve(null);
+    }
+
+    // Diğer event tipleri için hiçbir şey yapma
+    return Promise.resolve(null);
+  } catch (err) {
+    console.error('Error handling event', err);
+    return Promise.resolve(null);
+  }
 }
 
-module.exports = createBot;
-module.exports.LineBot = LineBot;
+// Basit health endpoint
+app.get('/', (req, res) => res.send('LINE Grup Bot çalışıyor'));
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`Server ${port} portunda çalışıyor`));
