@@ -19,7 +19,7 @@ const openai = new OpenAI({
 // Webhook endpoint
 app.post("/webhook", line.middleware(config), (req, res) => {
   res.sendStatus(200);
-  req.body.events.map(handleEvent);
+  req.body.events.map(handleEvent); // sadece bu olacak
 });
 
 // Event handler
