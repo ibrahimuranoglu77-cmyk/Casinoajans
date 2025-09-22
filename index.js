@@ -19,14 +19,12 @@ const openai = new OpenAI({
 // Webhook endpoint
 app.post("/webhook", line.middleware(config), (req, res) => {
   res.sendStatus(200);
-  req.body.events.map(handleEvent); // sadece bu olacak
+  req.body.events.map(handleEvent); // sadece bu satır olacak
 });
 
 // Event handler
 async function handleEvent(event) {
-  if (event.type !== "message" || event.message.type !== "text") {
-    return;
-  }
+  if (event.type !== "message" || event.message.type !== "text") return;
 
   try {
     const userMessage = event.message.text;
@@ -39,7 +37,7 @@ async function handleEvent(event) {
 
     const replyText = completion.choices[0].message.content;
 
-    // Kullanıcıya cevap gönder
+    // LINE'a cevap gönder
     await client.replyMessage(event.replyToken, {
       type: "text",
       text: replyText,
@@ -53,6 +51,7 @@ async function handleEvent(event) {
   }
 }
 
+// Port ayarı (Render otomatik port verir)
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`ChatGPT bot ${PORT} portunda çalışıyor 🚀`);
