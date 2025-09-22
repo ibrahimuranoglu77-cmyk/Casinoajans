@@ -46,6 +46,13 @@ async function handleEvent(event) {
     const userMessage = event.message.text;
     console.log("Kullanıcı mesajı:", userMessage);
 
+    // İlk olarak LINE’a test mesajı dön
+    await client.replyMessage(event.replyToken, {
+      type: "text",
+      text: "Mesaj alındı ✅"
+    });
+
+    // Sonra OpenAI cevabını al
     const completion = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [{ role: "user", content: userMessage }],
@@ -54,15 +61,14 @@ async function handleEvent(event) {
     const replyText = completion.choices[0].message.content;
     console.log("OpenAI cevabı:", replyText);
 
-    await client.replyMessage(event.replyToken, {
+    // OpenAI cevabını LINE’a gönder
+    await client.pushMessage(event.source.userId, {
       type: "text",
       text: replyText,
     });
 
   } catch (error) {
     console.error("OpenAI veya LINE Hatası:", error);
-
-    // Fallback mesaj ayrı try/catch ile
     try {
       await client.replyMessage(event.replyToken, {
         type: "text",
